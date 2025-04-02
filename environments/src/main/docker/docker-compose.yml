@@ -1,0 +1,13 @@
+services:
+  wildfly:
+    extends:
+      file: docker-compose.wildfly.yml
+      service: wildfly
+  postgres:
+    extends:
+      file: docker-compose.postgres.yml
+      service: postgres
+  rabbitmq:
+    extends:
+      file: docker-compose.rabbitmq.yml
+      service: rabbitmq

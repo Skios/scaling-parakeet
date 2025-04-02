@@ -1,19 +1,25 @@
 plugins {
-    id("java")
+    id("base")
 }
 
 group = "it.mrcid"
 version = "1.0-SNAPSHOT"
 
-repositories {
-    mavenCentral()
+allprojects {
+    repositories {
+        mavenCentral()
+    }
 }
 
-dependencies {
-    testImplementation(platform("org.junit:junit-bom:5.10.0"))
-    testImplementation("org.junit.jupiter:junit-jupiter")
-}
-
-tasks.test {
-    useJUnitPlatform()
+gradle.rootProject {
+    tasks.register("enforceRootWrapper") {
+        doLast {
+            fileTree(rootDir).matching {
+                include("*/gradlew", "*/gradlew.bat", "*/gradle/wrapper/*")
+            }.forEach {
+                println("Deleting unnecessary wrapper in ${it.parent}")
+                it.delete()
+            }
+        }
+    }
 }

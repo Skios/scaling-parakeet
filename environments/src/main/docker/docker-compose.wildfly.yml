@@ -1,0 +1,21 @@
+version: "3.9"
+
+services:
+  wildfly:
+    image: quay.io/wildfly/wildfly:${WILDFLY_VERSION:-latest}
+    platform: ${PLATFORM:-linux/amd64} # Default platform
+    ports:
+      - "8080:8080"    # HTTP port
+      - "9990:9990"    # Management port
+      - "8787:8787"    # Debug port
+      - "8788:8788"    # Server group 'other' port
+#    volumes:
+#      - ./wildfly/domain/domain.xml:/opt/jboss/wildfly/domain/configuration/domain.xml:rw
+#      - ./wildfly/domain/host.xml:/opt/jboss/wildfly/domain/configuration/host.xml:rw
+#      - ./wildfly/modules:/opt/jboss/wildfly/modules:rw
+    environment:
+      - JBOSS_HOME=/opt/jboss/wildfly
+      - JBOSS_MODE=domain
+      - JBOSS_DOMAIN_CONFIG=${JBOSS_DOMAIN_CONFIG:-domain.xml}
+      - JBOSS_HOST_CONFIG=${JBOSS_HOST_CONFIG:-host.xml}
+    command: ["/opt/jboss/wildfly/bin/domain.sh", "-b", "0.0.0.0", "-bmanagement", "0.0.0.0"]
