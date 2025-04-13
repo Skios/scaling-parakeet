@@ -11,3 +11,7 @@ services:
     extends:
       file: docker-compose.rabbitmq.yml
       service: rabbitmq
+  pgadmin:
+    extends:
+      file: docker-compose.pgadmin.yml
+      service: pgadmin
