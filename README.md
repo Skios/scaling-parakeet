@@ -3,6 +3,92 @@
 ## Description
 A modern development toolkit project built with Kotlin/Java using Gradle. This project is organized as a multi-module build system, designed to provide development environment utilities and tools.
 
+## Environment Variables
+
+| Variable | Description | Default Value | Required |
+|----------|-------------|---------------|----------|
+| **Platform Configuration** |
+| `PLATFORM` | Docker platform to use | `linux/amd64` | No |
+| **WildFly Configuration** |
+| `WILDFLY_VERSION` | WildFly version to use | `latest` | No |
+| `WILDFLY_MODE` | WildFly operation mode (domain/standalone) | `domain` | No |
+| `WILDFLY_ADMIN_USER` | WildFly admin username | `admin` | No |
+| `WILDFLY_ADMIN_PASSWORD` | WildFly admin password | `admin123` | No |
+| `WILDFLY_DOMAIN_CONFIG` | Domain mode configuration file | `domain.xml` | No |
+| `WILDFLY_HOST_CONFIG` | Domain mode host configuration file | `host.xml` | No |
+| `WILDFLY_STANDALONE_CONFIG` | Standalone mode configuration file | `standalone.xml` | No |
+| **PostgreSQL Configuration** |
+| `POSTGRES_VERSION` | PostgreSQL version to use | `latest` | No |
+| `POSTGRES_DB` | PostgreSQL database name | `appdb` | No |
+| `POSTGRES_USER` | PostgreSQL username | `appuser` | No |
+| `POSTGRES_PASSWORD` | PostgreSQL password | `apppass` | No |
+| **RabbitMQ Configuration** |
+| `RABBITMQ_VERSION` | RabbitMQ version to use | `latest` | No |
+| **pgAdmin Configuration** |
+| `PGADMIN_DEFAULT_EMAIL` | pgAdmin admin email | `admin@admin.com` | No |
+| `PGADMIN_DEFAULT_PASSWORD` | pgAdmin admin password | `admin` | No |
+| **Docker Compose Configuration** |
+| `COMPOSE_PROFILES` | Active Docker Compose profiles | `wildfly,postgres,rabbitmq,pgadmin` | No |
+
+### Environment Files Precedence
+Environment variables are loaded in the following order (later files override earlier ones):
+1. `.env` (base configuration)
+2. `arm.env` (if running on ARM architecture)
+3. `local.env` (if exists)
+
+### Example Environment Files
+
+#### .env (Base Configuration)
+```bash
+# Platform configuration
+PLATFORM: linux/amd64
+
+# WildFly Configuration
+WILDFLY_VERSION: latest
+WILDFLY_MODE: domain
+WILDFLY_ADMIN_USER: admin
+WILDFLY_ADMIN_PASSWORD: admin123
+WILDFLY_DOMAIN_CONFIG: domain.xml
+WILDFLY_HOST_CONFIG: host.xml
+WILDFLY_STANDALONE_CONFIG: standalone.xml
+
+# PostgreSQL Configuration
+POSTGRES_VERSION: latest
+POSTGRES_DB: appdb
+POSTGRES_USER: appuser
+POSTGRES_PASSWORD: apppass
+
+# RabbitMQ Configuration
+RABBITMQ_VERSION: latest
+
+# pgAdmin Configuration
+PGADMIN_DEFAULT_EMAIL: admin@admin.com
+PGADMIN_DEFAULT_PASSWORD: admin
+
+COMPOSE_PROFILES: wildfly,postgres,rabbitmq,pgadmin
+```
+
+#### arm.env (ARM-specific Configuration)
+```bash
+# Platform configuration
+PLATFORM: linux/arm64
+
+# WildFly Configuration
+WILDFLY_VERSION: 26.1.3.Final-jdk11
+```
+
+#### local.env (Local Overrides)
+```bash
+# PostgreSQL Configuration
+POSTGRES_DB: myapp
+POSTGRES_USER: myuser
+POSTGRES_PASSWORD: mypassword
+
+# pgAdmin Configuration
+PGADMIN_DEFAULT_EMAIL: me@example.com
+PGADMIN_DEFAULT_PASSWORD: mypgadminpass
+```
+
 ## Project Structure
 ```
 .
@@ -164,3 +250,53 @@ This project is open source and available under the MIT License.
 ## Contact
 Project maintained by mrcid
 Project Link: [https://github.com/mrcid/dev-toolkit](https://github.com/mrcid/dev-toolkit)
+
+### Docker Compose Profiles
+Docker Compose profiles allow you to selectively enable or disable services in your development environment. This is controlled by the `COMPOSE_PROFILES` environment variable.
+
+#### Available Profiles
+| Profile | Description | Service |
+|---------|-------------|---------|
+| `wildfly` | Enables WildFly application server | WildFly |
+| `postgres` | Enables PostgreSQL database | PostgreSQL |
+| `rabbitmq` | Enables RabbitMQ message broker | RabbitMQ |
+| `pgadmin` | Enables pgAdmin database management | pgAdmin |
+
+#### Profile Usage Examples
+
+1. **Default Configuration** (All services enabled)
+```bash
+COMPOSE_PROFILES: wildfly,postgres,rabbitmq,pgadmin
+```
+
+2. **Backend Only** (WildFly and PostgreSQL)
+```bash
+COMPOSE_PROFILES: wildfly,postgres
+```
+
+3. **Database Only** (PostgreSQL and pgAdmin)
+```bash
+COMPOSE_PROFILES: postgres,pgadmin
+```
+
+4. **Message Broker Only**
+```bash
+COMPOSE_PROFILES: rabbitmq
+```
+
+#### Profile Configuration Tips
+- Profiles can be combined by separating them with commas
+- Services not included in active profiles will not be started
+- The order of profiles doesn't matter
+- You can override profiles in your `local.env` file
+- Each service's configuration is still loaded from its respective `.env` file
+
+Example `local.env` with custom profiles:
+```bash
+# Enable only WildFly and PostgreSQL
+COMPOSE_PROFILES: wildfly,postgres
+
+# Customize the enabled services
+WILDFLY_VERSION: 26.1.3.Final
+POSTGRES_DB: myapp
+```
