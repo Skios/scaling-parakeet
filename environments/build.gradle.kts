@@ -15,8 +15,4 @@ tasks.register<Exec>("startEnvironment") {
     }else{
         commandLine("docker","compose", "--project-name=dev-env", "-f", "./docker-compose.yml", "up", "--detach")
     }
-
-    doLast {
-        commandLine( "docker", "exec", "-it", "dev-env-wildfly-1", "/opt/jboss/wildfly/bin/add-user.sh", "-m", "-u", "admin", "-p", "password", "--silent")
-    }
 }
