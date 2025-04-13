@@ -44,16 +44,34 @@ tasks.register<Exec>("startEnvironment") {
     commandLine(command)
 
     doLast {
-        // Wait for WildFly to start
-        Thread.sleep(15000)
+        // Container health check configuration
+        val maxAttempts = 30  // 5 minutes total (10 seconds * 30)
+        val waitInterval = 10000L  // 10 seconds between checks
         
-        // Check if WildFly is running
-        val wildflyStatus = exec {
-            commandLine("docker", "ps", "--filter", "name=dev-env-wildfly-1", "--format", "{{.Status}}")
+        // Function to check container health
+        fun checkContainerHealth(containerName: String, healthCheck: () -> Boolean): Boolean {
+            var attempts = 0
+            while (attempts < maxAttempts) {
+                if (healthCheck()) {
+                    return true
+                }
+                println("Waiting for $containerName to be ready... (attempt ${attempts + 1}/$maxAttempts)")
+                Thread.sleep(waitInterval)
+                attempts++
+            }
+            return false
         }
-        
-        if (!wildflyStatus.toString().contains("Up")) {
-            throw GradleException("WildFly container failed to start properly")
+
+        // Check WildFly health
+        val wildflyHealthy = checkContainerHealth("WildFly") {
+            val status = exec {
+                commandLine("docker", "ps", "--filter", "name=dev-env-wildfly-1", "--format", "{{.Status}}")
+            }
+            status.toString().contains("Up") && !status.toString().contains("unhealthy")
+        }
+
+        if (!wildflyHealthy) {
+            throw GradleException("WildFly container failed to start properly or is unhealthy")
         }
         
         println("WildFly environment started successfully")
