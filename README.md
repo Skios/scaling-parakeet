@@ -12,12 +12,15 @@ A modern development toolkit project built with Kotlin/Java using Gradle. This p
 │       ├── docker-compose.wildfly.yml # WildFly service configuration
 │       ├── docker-compose.postgres.yml# PostgreSQL service configuration
 │       ├── docker-compose.rabbitmq.yml# RabbitMQ service configuration
+│       ├── docker-compose.pgadmin.yml # pgAdmin service configuration
 │       ├── wildfly/                   # WildFly specific configurations
 │       │   ├── domain/               # Domain mode configurations
 │       │   │   └── configuration/    # domain.xml, host.xml, etc.
 │       │   └── standalone/          # Standalone mode configurations
 │       │       └── configuration/    # standalone.xml, etc.
-│       └── postgres/                  # PostgreSQL specific configurations
+│       ├── postgres/                  # PostgreSQL specific configurations
+│       └── pgadmin/                   # pgAdmin specific configurations
+│           └── data/                  # pgAdmin persistent data
 ├── gradle/          # Gradle wrapper and build utilities
 └── build.gradle.kts # Main build configuration
 ```
@@ -50,7 +53,7 @@ cd dev-toolkit
   - Sets up the working directory for Docker operations
   - Checks for environment-specific configurations (local.env)
   - Starts the Docker containers in detached mode
-  - Configures WildFly with the specified admin user and password
+  - Configures WildFly with custom admin user and password
 
 ### Available Services
 The development environment includes the following services:
@@ -60,25 +63,36 @@ The development environment includes the following services:
    - Management Port: 9990
    - Debug Port: 8787
    - Server Group Port: 8788
-   - Configurable Modes:
-     - Domain Mode (default)
-     - Standalone Mode
-   - Customizable Configuration Files:
-     - domain.xml (Domain Mode)
-     - host.xml (Domain Mode)
-     - standalone.xml (Standalone Mode)
-   - Management Console Access:
-     - URL: http://localhost:9990
-     - User: Configurable via WILDFLY_ADMIN_USER
-     - Password: Configurable via WILDFLY_ADMIN_PASSWORD
+   - Configuration:
+     - Mode: Domain or Standalone (configurable via WILDFLY_MODE)
+     - Custom domain.xml and host.xml support
+     - Custom standalone.xml support
+     - Custom modules support
+   - Features:
+     - Full Java EE support
+     - Configurable admin user and password
+     - Management console access
+     - Debug support
 
 2. **PostgreSQL Database**
    - Custom configuration support
    - Persistent storage
+   - Accessible via pgAdmin
 
 3. **RabbitMQ Message Broker**
    - Message queuing support
    - AMQP protocol
+
+4. **pgAdmin Database Management Tool**
+   - Web Interface Port: 5050
+   - Features:
+     - Graphical PostgreSQL database management
+     - Query tool
+     - Server management
+     - User management
+   - Default credentials:
+     - Email: admin@admin.com
+     - Password: admin
 
 ## Usage
 The project uses Gradle for build automation. Common commands:
@@ -98,25 +112,37 @@ The environment can be customized using the following files:
 - `.env`: Default environment variables
 
 ### WildFly Configuration
-The following environment variables can be set to configure WildFly:
+You can customize WildFly by setting the following environment variables in your `.env` or `local.env` file:
 
 ```bash
 # WildFly Configuration
-WILDFLY_VERSION=latest          # WildFly version to use
-WILDFLY_MODE=domain            # Operation mode: domain or standalone
-WILDFLY_ADMIN_USER=admin       # Management console username
-WILDFLY_ADMIN_PASSWORD=admin123 # Management console password
-WILDFLY_DOMAIN_CONFIG=domain.xml # Domain mode configuration file
-WILDFLY_HOST_CONFIG=host.xml   # Host configuration file
-WILDFLY_STANDALONE_CONFIG=standalone.xml # Standalone mode configuration file
+WILDFLY_VERSION: latest
+WILDFLY_MODE: domain          # or 'standalone'
+WILDFLY_ADMIN_USER: admin
+WILDFLY_ADMIN_PASSWORD: admin123
+WILDFLY_DOMAIN_CONFIG: domain.xml
+WILDFLY_HOST_CONFIG: host.xml
+WILDFLY_STANDALONE_CONFIG: standalone.xml
 ```
 
-To customize WildFly configuration:
-1. Place your custom configuration files in the appropriate directory:
-   - Domain Mode: `environments/src/main/docker/wildfly/domain/configuration/`
-   - Standalone Mode: `environments/src/main/docker/wildfly/standalone/configuration/`
-2. Update the corresponding environment variables in `.env` or `local.env`
-3. Restart the environment
+### pgAdmin Configuration
+You can customize pgAdmin by setting the following environment variables:
+
+```bash
+# pgAdmin Configuration
+PGADMIN_DEFAULT_EMAIL: admin@admin.com
+PGADMIN_DEFAULT_PASSWORD: admin
+```
+
+To connect to PostgreSQL from pgAdmin:
+1. Open http://localhost:5050 in your browser
+2. Log in with the credentials from your .env file
+3. Add a new server with the following details:
+   - Host: postgres
+   - Port: 5432
+   - Database: ${POSTGRES_DB}
+   - Username: ${POSTGRES_USER}
+   - Password: ${POSTGRES_PASSWORD}
 
 ## Features
 - Multi-module project structure
@@ -124,8 +150,8 @@ To customize WildFly configuration:
 - Gradle-based build system
 - Maven Central repository integration
 - Docker-based development environment setup
-- WildFly application server integration with configurable modes
-- PostgreSQL database support
+- WildFly application server integration with full configuration support
+- PostgreSQL database support with pgAdmin management
 - RabbitMQ message broker integration
 - Cross-platform support (configurable via PLATFORM environment variable)
 
