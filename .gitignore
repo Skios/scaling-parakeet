@@ -45,3 +45,6 @@ bin/
 ### Other ###
 
 /environments/src/main/docker/local.env
+/environments/src/main/docker/wildfly/domain/configuration/
+/environments/src/main/docker/wildfly/modules/system/
+/environments/src/main/docker/wildfly/standalone/configuration/

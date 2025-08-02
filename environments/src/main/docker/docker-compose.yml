@@ -1,17 +1,42 @@
+version: "3.9"
+
 services:
+  # Core Services
+  wildfly-init:
+    extends:
+      file: docker-compose.wildfly-init.yml
+      service: wildfly-init
+    profiles:
+      - init
+
   wildfly:
     extends:
       file: docker-compose.wildfly.yml
       service: wildfly
+    profiles:
+      - wildfly
+      - full
+      - dev
+    depends_on:
+      - postgres
+
   postgres:
     extends:
       file: docker-compose.postgres.yml
       service: postgres
+    profiles:
+      - database
+      - postgres
+      - full
+      - dev
+      - wildfly
+
   rabbitmq:
     extends:
       file: docker-compose.rabbitmq.yml
       service: rabbitmq
-  pgadmin:
-    extends:
-      file: docker-compose.pgadmin.yml
-      service: pgadmin
+    profiles:
+      - messaging
+      - rabbitmq
+      - full
+      - dev
