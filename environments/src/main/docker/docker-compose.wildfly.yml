@@ -12,7 +12,7 @@ services:
     volumes:
       - ./wildfly/domain/configuration:/opt/jboss/wildfly/domain/configuration:rw
       - ./wildfly/standalone/configuration:/opt/jboss/wildfly/standalone/configuration:rw
-#      - ./wildfly/modules:/opt/jboss/wildfly/modules:rw
+      - ./wildfly/modules:/opt/jboss/wildfly/modules:rw
       - ./wildfly/scripts:/mnt/scripts:ro
     environment:
       - JBOSS_HOME=/opt/jboss/wildfly
