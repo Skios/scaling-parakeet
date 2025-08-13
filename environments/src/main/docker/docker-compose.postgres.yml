@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:${POSTGRES_VERSION}
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    #volumes:
+     # - db-data:/var/lib/postgresql/data
+     # - ./postgres/init/backup.sql:/docker-entrypoint-initdb.d/backup.sql
+volumes:
+  db-data:
+    driver: local

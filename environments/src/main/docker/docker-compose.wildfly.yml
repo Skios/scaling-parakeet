@@ -1,0 +1,25 @@
+version: "3.9"
+
+services:
+  wildfly:
+    image: quay.io/wildfly/wildfly:${WILDFLY_VERSION:-latest}
+    platform: ${PLATFORM:-linux/amd64}
+    ports:
+      - "8080:8080"    # HTTP port
+      - "9990:9990"    # Management port
+      - "8787:8787"    # Debug port
+      - "8788:8788"    # Server group 'other' port
+    volumes:
+      - ./wildfly/domain/configuration:/opt/jboss/wildfly/domain/configuration:rw
+      - ./wildfly/standalone/configuration:/opt/jboss/wildfly/standalone/configuration:rw
+      - ./wildfly/modules:/opt/jboss/wildfly/modules:rw
+      - ./wildfly/scripts:/mnt/scripts:ro
+    environment:
+      - JBOSS_HOME=/opt/jboss/wildfly
+      - JBOSS_MODE=${WILDFLY_MODE}
+      - JBOSS_DOMAIN_CONFIG=${WILDFLY_DOMAIN_CONFIG}
+      - JBOSS_HOST_CONFIG=${WILDFLY_HOST_CONFIG}
+      - JBOSS_STANDALONE_CONFIG=${WILDFLY_STANDALONE_CONFIG}
+      - WILDFLY_ADMIN_USER=${WILDFLY_ADMIN_USER}
+      - WILDFLY_ADMIN_PASSWORD=${WILDFLY_ADMIN_PASSWORD}
+    entrypoint: [ "/mnt/scripts/init/wildfly-start.sh" ]

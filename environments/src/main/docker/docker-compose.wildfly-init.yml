@@ -1,0 +1,11 @@
+services:
+  wildfly-init:
+    image: quay.io/wildfly/wildfly:${WILDFLY_VERSION:-latest}
+    platform: ${PLATFORM:-linux/amd64}
+    user: jboss
+    entrypoint: [ "/mnt/scripts/init/copy-initial-configs.sh" ]
+    volumes:
+      - ./wildfly/modules:/mnt/modules
+      - ./wildfly/standalone/configuration:/mnt/standalone/configuration
+      - ./wildfly/domain/configuration:/mnt/domain/configuration
+      - ./wildfly/scripts:/mnt/scripts:ro
