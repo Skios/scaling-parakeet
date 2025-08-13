@@ -2,66 +2,258 @@ plugins {
     id("base")
 }
 
-// Funzione per eseguire comando e aspettare - VERSIONE CORRETTA
+// Funzione per eseguire comando e aspettare con output in tempo reale
 fun executeCommand(cmd: List<String>, workingDir: File, description: String) {
+    println("\n" + "=".repeat(60))
     println("🔄 $description")
-    println("Comando: ${cmd.joinToString(" ")}")
+    println("📂 Directory: ${workingDir.absolutePath}")
+    println("🔧 Comando: ${cmd.joinToString(" ")}")
+    println("=".repeat(60))
 
     val processBuilder = ProcessBuilder(cmd)
         .directory(workingDir)
-        .redirectOutput(ProcessBuilder.Redirect.INHERIT)
-        .redirectError(ProcessBuilder.Redirect.INHERIT)
+        .redirectErrorStream(true) // Combina stdout e stderr
 
     val process = processBuilder.start()
+
+    // Leggi l'output in tempo reale
+    val reader = process.inputStream.bufferedReader()
+    var line: String?
+    while (reader.readLine().also { line = it } != null) {
+        println("   $line")
+        System.out.flush() // Forza il flush per vedere l'output immediatamente
+    }
+
     val exitCode = process.waitFor()
 
     if (exitCode != 0) {
-        throw GradleException("❌ Comando fallito con exit code: $exitCode")
+        println("❌ ERRORE: Comando fallito con exit code: $exitCode")
+        throw GradleException("❌ Comando fallito: $description (exit code: $exitCode)")
     }
-    println("✅ $description completato")
+    println("✅ $description completato con successo")
 }
 
-// Funzione per eseguire comando con timeout - VERSIONE CON TIMEOUT
-fun executeCommandWithTimeout(cmd: List<String>, workingDir: File, description: String, timeoutMinutes: Long = 2) {
+// Funzione per eseguire comando con output ottimizzato (per docker pull)
+fun executeCommandWithProgressOptimization(cmd: List<String>, workingDir: File, description: String) {
+    println("\n" + "=".repeat(60))
     println("🔄 $description")
-    println("Comando: ${cmd.joinToString(" ")}")
+    println("📂 Directory: ${workingDir.absolutePath}")
+    println("🔧 Comando: ${cmd.joinToString(" ")}")
+    println("=".repeat(60))
 
     val processBuilder = ProcessBuilder(cmd)
         .directory(workingDir)
-        .redirectOutput(ProcessBuilder.Redirect.INHERIT)
-        .redirectError(ProcessBuilder.Redirect.INHERIT)
+        .redirectErrorStream(true)
 
     val process = processBuilder.start()
+    val reader = process.inputStream.bufferedReader()
+
+    var line: String?
+    var currentService = ""
+    var lastWasProgress = false
+    val progressLines = mutableSetOf<String>() // Track quali layer stanno scaricando
+
+    while (reader.readLine().also { line = it } != null) {
+        val currentLine = line!!.trim()
+
+        // Skip righe completamente vuote
+        if (currentLine.isEmpty()) continue
+
+        // Rileva inizio pull di un servizio
+        if (currentLine.contains("Pulling") && !currentLine.contains("Downloading") && !currentLine.contains("Extracting")) {
+            currentService = currentLine.substringAfter("Pulling ").substringBefore(" ").trim()
+            println("📦 $currentLine")
+            lastWasProgress = false
+            continue
+        }
+
+        // Gestisci le diverse tipologie di output
+        when {
+            // Linee di progresso (Downloading/Extracting con percentuali o MB)
+            currentLine.contains("Downloading") || currentLine.contains("Extracting") -> {
+                // Mostra il progresso ma raggruppa per layer
+                val layerId = currentLine.substringBefore(":").trim()
+                val progressInfo = currentLine.substringAfter(":").trim()
+
+                // Se è la prima volta che vediamo questo layer, mostra su nuova riga
+                if (!progressLines.contains(layerId)) {
+                    progressLines.add(layerId)
+                    println("   ⏬ $layerId: $progressInfo")
+                } else {
+                    // Aggiorna solo se ci sono cambiamenti significativi nella percentuale
+                    if (progressInfo.contains("%") || progressInfo.contains("MB") || progressInfo.contains("KB")) {
+                        print("\r   ⏬ $layerId: $progressInfo")
+                        if (progressInfo.contains("100%") || progressInfo.contains("complete")) {
+                            println() // Nuova riga quando completo
+                            progressLines.remove(layerId)
+                        } else {
+                            System.out.flush()
+                        }
+                    }
+                }
+                lastWasProgress = true
+            }
+
+            // Status di completamento
+            currentLine.contains("Pull complete") -> {
+                if (lastWasProgress) println() // Nuova riga dopo il progresso
+                val layerId = currentLine.substringBefore(":").trim()
+                println("   ✅ Pull complete: $layerId")
+                progressLines.remove(layerId)
+                lastWasProgress = false
+            }
+
+            // Layer già esistenti
+            currentLine.contains("Already exists") -> {
+                if (lastWasProgress) println()
+                val layerId = currentLine.substringBefore(":").trim()
+                println("   📋 Already exists: $layerId")
+                lastWasProgress = false
+            }
+
+            // Download completo
+            currentLine.contains("Download complete") -> {
+                // Non stampare ogni singolo "download complete", è spam
+                val layerId = currentLine.substringBefore(":").trim()
+                progressLines.remove(layerId)
+                // Solo un punto per indicare progresso
+                print(".")
+                System.out.flush()
+                lastWasProgress = true
+            }
+
+            // Verifica checksum (skip, è spam)
+            currentLine.contains("Verifying Checksum") -> {
+                // Skip silenziosamente
+            }
+
+            // Status finali importanti
+            currentLine.contains("Status:") ||
+                    currentLine.contains("Downloaded newer image") ||
+                    currentLine.contains("Image is up to date") -> {
+                if (lastWasProgress) println()
+                println("   📋 $currentLine")
+                lastWasProgress = false
+            }
+
+            // Digest e informazioni finali
+            currentLine.contains("sha256:") || currentLine.contains("Digest:") -> {
+                if (lastWasProgress) println()
+                println("   🔑 ${currentLine.take(80)}${if (currentLine.length > 80) "..." else ""}")
+                lastWasProgress = false
+            }
+
+            // Errori e warning
+            currentLine.lowercase().contains("error") ||
+                    currentLine.lowercase().contains("warning") -> {
+                if (lastWasProgress) println()
+                println("   ⚠️  $currentLine")
+                lastWasProgress = false
+            }
+
+            // Altre informazioni importanti (ma non spam)
+            currentLine.contains("latest:") ||
+                    currentLine.startsWith("docker.io/") ||
+                    currentLine.startsWith("ghcr.io/") ||
+                    currentLine.contains("Pulled") -> {
+                if (lastWasProgress) println()
+                println("   📄 $currentLine")
+                lastWasProgress = false
+            }
+
+            // Skip righe repetitive o poco utili
+            currentLine.contains("Waiting") ||
+                    currentLine.contains("Retrying") ||
+                    currentLine.contains("Layer already exists") -> {
+                // Skip silenziosamente per ridurre spam
+            }
+
+            // Tutto il resto (ma con filtro per evitare troppo spam)
+            else -> {
+                if (currentLine.length > 5 && !currentLine.matches(Regex("^[a-f0-9]{12}$"))) {
+                    if (lastWasProgress) println()
+                    println("   🔧 $currentLine")
+                    lastWasProgress = false
+                }
+            }
+        }
+    }
+
+    if (lastWasProgress) {
+        println() // Assicurati che termini con una nuova riga
+    }
+
+    val exitCode = process.waitFor()
+
+    if (exitCode != 0) {
+        println("❌ ERRORE: Comando fallito con exit code: $exitCode")
+        throw GradleException("❌ Comando fallito: $description (exit code: $exitCode)")
+    }
+    println("✅ $description completato con successo")
+}
+
+// Funzione per eseguire comando con timeout e output in tempo reale
+fun executeCommandWithTimeout(cmd: List<String>, workingDir: File, description: String, timeoutMinutes: Long = 2) {
+    println("\n" + "=".repeat(60))
+    println("🔄 $description (timeout: $timeoutMinutes min)")
+    println("📂 Directory: ${workingDir.absolutePath}")
+    println("🔧 Comando: ${cmd.joinToString(" ")}")
+    println("=".repeat(60))
+
+    val processBuilder = ProcessBuilder(cmd)
+        .directory(workingDir)
+        .redirectErrorStream(true)
+
+    val process = processBuilder.start()
+
+    // Thread per leggere l'output
+    val outputThread = Thread {
+        try {
+            val reader = process.inputStream.bufferedReader()
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                println("   $line")
+                System.out.flush()
+            }
+        } catch (e: Exception) {
+            // Il processo potrebbe essere terminato
+        }
+    }
+    outputThread.start()
 
     // Aspetta con timeout
     val completed = process.waitFor(timeoutMinutes, java.util.concurrent.TimeUnit.MINUTES)
 
     if (!completed) {
-        println("⏰ Timeout di $timeoutMinutes minuti raggiunto, terminazione forzata del processo...")
+        println("⏰ TIMEOUT: $timeoutMinutes minuti raggiunti, terminazione forzata...")
         process.destroyForcibly()
-        throw GradleException("❌ Comando terminato per timeout dopo $timeoutMinutes minuti")
+        outputThread.interrupt()
+        throw GradleException("❌ Comando terminato per timeout dopo $timeoutMinutes minuti: $description")
     }
+
+    outputThread.join(1000) // Aspetta che finisca di leggere l'output
 
     val exitCode = process.exitValue()
     if (exitCode != 0) {
-        throw GradleException("❌ Comando fallito con exit code: $exitCode")
+        println("❌ ERRORE: Comando fallito con exit code: $exitCode")
+        throw GradleException("❌ Comando fallito: $description (exit code: $exitCode)")
     }
-    println("✅ $description completato")
+    println("✅ $description completato con successo")
 }
 
 // Funzione di utilità per creare la lista degli --env-file
-fun addEnvFiles(command: MutableList<String>): MutableList<String> {
+fun addEnvFiles(command: MutableList<String>, workingDir: File): MutableList<String> {
     val isArm = System.getProperty("os.arch").contains("aarch64") ||
             System.getProperty("os.arch").contains("arm")
 
     command.add("--env-file")
     command.add(".env")
 
-    if (isArm && file("arm.env").exists()) {
+    if (isArm && workingDir.resolve("arm.env").exists()) {
         command.add("--env-file")
         command.add("arm.env")
     }
-    if (file("local.env").exists()) {
+    if (workingDir.resolve("local.env").exists()) {
         command.add("--env-file")
         command.add("local.env")
     }
@@ -69,8 +261,8 @@ fun addEnvFiles(command: MutableList<String>): MutableList<String> {
 }
 
 // Funzione per leggere i profili dal file .env
-fun getActiveProfiles(): List<String> {
-    val envFile = file("./src/main/docker/.env")
+fun getActiveProfiles(workingDir: File): List<String> {
+    val envFile = workingDir.resolve(".env")
     if (!envFile.exists()) {
         println("⚠️  File .env non trovato, uso profilo 'dev' di default")
         return listOf("dev")
@@ -111,35 +303,52 @@ fun ensureDirectoriesExist(workingDir: File) {
     }
 }
 
-// Funzione per controllare la salute dei container
+// Funzione per controllare la salute dei container con output dettagliato
 fun checkContainerHealth(containerName: String, filterName: String): Boolean {
     val maxAttempts = 30  // 5 minuti totali (10 secondi * 30)
     val waitInterval = 10000L  // 10 secondi tra i controlli
 
+    println("\n🔍 Controllo salute container: $containerName")
+
     var attempts = 0
     while (attempts < maxAttempts) {
         try {
+            print("   Tentativo ${attempts + 1}/$maxAttempts... ")
             val processBuilder = ProcessBuilder(
                 "docker", "ps",
                 "--filter", "name=$filterName",
-                "--format", "{{.Status}}"
+                "--format", "{{.Names}} {{.Status}}"
             )
             val process = processBuilder.start()
             val output = process.inputStream.bufferedReader().readText().trim()
             val exitCode = process.waitFor()
 
-            if (exitCode == 0 && output.contains("Up") && !output.contains("unhealthy")) {
-                println("✅ $containerName is healthy")
-                return true
+            if (exitCode == 0) {
+                if (output.isEmpty()) {
+                    println("❌ Container non trovato")
+                } else {
+                    println("Status: $output")
+                    if (output.contains("Up") && !output.contains("unhealthy")) {
+                        println("✅ $containerName is healthy")
+                        return true
+                    }
+                }
+            } else {
+                println("❌ Errore comando docker (exit code: $exitCode)")
             }
         } catch (e: Exception) {
-            println("Errore nel controllo dello stato di $containerName: ${e.message}")
+            println("❌ Errore nel controllo dello stato di $containerName: ${e.message}")
         }
 
-        println("Waiting for $containerName to be ready... (attempt ${attempts + 1}/$maxAttempts)")
-        Thread.sleep(waitInterval)
+        if (attempts < maxAttempts - 1) {
+            print("   ⏳ Attesa ${waitInterval/1000} secondi prima del prossimo controllo...")
+            Thread.sleep(waitInterval)
+            println(" fatto")
+        }
         attempts++
     }
+
+    println("❌ $containerName non è diventato healthy dopo $maxAttempts tentativi")
     return false
 }
 
@@ -176,45 +385,144 @@ fun printServiceInfo(profiles: List<String>) {
     println("=".repeat(50))
 }
 
-tasks.register<Exec>("downloadImages") {
+tasks.register("debugEnvironment") {
+    group = "environment"
+    description = "Debug dell'ambiente - mostra configurazione e stato"
+
+    doLast {
+        println("\n" + "=".repeat(60))
+        println("🔍 DEBUG ENVIRONMENT CONFIGURATION")
+        println("=".repeat(60))
+
+        val workingDir = file("./src/main/docker")
+        println("📂 Working directory: ${workingDir.absolutePath}")
+        println("📂 Directory exists: ${workingDir.exists()}")
+
+        if (workingDir.exists()) {
+            println("📁 Contents:")
+            workingDir.listFiles()?.forEach { file ->
+                println("   ${if (file.isDirectory()) "📁" else "📄"} ${file.name}")
+            }
+        }
+
+        // Controlla file .env
+        val envFile = workingDir.resolve(".env")
+        println("\n🔧 Environment file (.env):")
+        println("   Path: ${envFile.absolutePath}")
+        println("   Exists: ${envFile.exists()}")
+
+        if (envFile.exists()) {
+            println("   Content:")
+            envFile.readLines().take(10).forEach { line ->
+                println("     $line")
+            }
+        }
+
+        // Controlla profili attivi
+        println("\n🏷️  Active profiles:")
+        try {
+            val activeProfiles = getActiveProfiles(workingDir)
+            println("   Profiles: ${activeProfiles.joinToString(", ")}")
+        } catch (e: Exception) {
+            println("   ❌ Error reading profiles: ${e.message}")
+        }
+
+        // Controlla Docker
+        println("\n🐳 Docker status:")
+        try {
+            val dockerVersion = ProcessBuilder("docker", "--version")
+                .start()
+                .inputStream
+                .bufferedReader()
+                .readText()
+                .trim()
+            println("   Docker: $dockerVersion")
+        } catch (e: Exception) {
+            println("   ❌ Docker not available: ${e.message}")
+        }
+
+        try {
+            val dockerComposeVersion = ProcessBuilder("docker", "compose", "--version")
+                .start()
+                .inputStream
+                .bufferedReader()
+                .readText()
+                .trim()
+            println("   Docker Compose: $dockerComposeVersion")
+        } catch (e: Exception) {
+            println("   ❌ Docker Compose not available: ${e.message}")
+        }
+
+        // Controlla container esistenti
+        println("\n📦 Existing containers (dev-env project):")
+        try {
+            val process = ProcessBuilder(
+                "docker", "ps", "-a",
+                "--filter", "label=com.docker.compose.project=dev-env",
+                "--format", "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+            ).directory(workingDir).start()
+
+            val output = process.inputStream.bufferedReader().readText()
+            if (output.trim().isEmpty()) {
+                println("   No containers found")
+            } else {
+                println("   $output")
+            }
+        } catch (e: Exception) {
+            println("   ❌ Error checking containers: ${e.message}")
+        }
+
+        println("\n=".repeat(60))
+        println("🎯 CONSIGLI:")
+        println("1. Esegui 'gradle debugEnvironment' se hai problemi")
+        println("2. Esegui 'gradle downloadImages' per scaricare le immagini")
+        println("3. Esegui 'gradle bootEnvironment' per avviare tutto")
+        println("4. Esegui 'gradle statusEnvironment' per vedere lo stato")
+        println("=".repeat(60))
+    }
+}
+
+tasks.register("downloadImages") {
     group = "environment"
     description = "Scarica le immagini Docker necessarie"
 
-    workingDir = file("./src/main/docker")
+    doLast {
+        println("\n🚀 INIZIO TASK: downloadImages")
+        val workingDir = file("./src/main/docker")
 
-    // Comando dummy
-    commandLine("docker", "version")
+        println("📂 Verifico directory di lavoro: ${workingDir.absolutePath}")
+        if (!workingDir.exists()) {
+            throw GradleException("❌ Directory non trovata: ${workingDir.absolutePath}")
+        }
 
-    doFirst {
-        val activeProfiles = getActiveProfiles()
+        val activeProfiles = getActiveProfiles(workingDir)
+        println("🏷️  Profili attivi: ${activeProfiles.joinToString(", ")}")
 
-        println("📦 Download immagini Docker per profili: ${activeProfiles.joinToString(", ")}")
+        println("📦 Inizio download immagini Docker...")
 
-        var command = mutableListOf("docker", "compose", "-f", "docker-compose.yml")
+        val command = mutableListOf("docker", "compose", "-f", "docker-compose.yml")
 
         // Aggiungi i profili al comando
         activeProfiles.forEach { profile ->
             command.addAll(listOf("--profile", profile))
         }
 
-        addEnvFiles(command)
+        addEnvFiles(command, workingDir)
         command.add("pull")
 
-        executeCommand(command, workingDir, "Download immagini Docker")
+        // Usa la funzione ottimizzata per il download
+        executeCommandWithProgressOptimization(command, workingDir, "Download immagini Docker")
+        println("🎉 COMPLETATO: downloadImages")
     }
 }
 
-tasks.register<Exec>("initEnvironment") {
+tasks.register("initEnvironment") {
     group = "environment"
     description = "Esegue il container wildfly-init per setup iniziale"
 
-    workingDir = file("./src/main/docker")
-
-    // Comando dummy che viene eseguito dopo doFirst
-    commandLine("docker", "version")
-
-    doFirst {
-        val activeProfiles = getActiveProfiles()
+    doLast {
+        val workingDir = file("./src/main/docker")
+        val activeProfiles = getActiveProfiles(workingDir)
 
         // Verifica se è necessario il wildfly-init
         val needsWildflyInit = activeProfiles.any {
@@ -223,7 +531,7 @@ tasks.register<Exec>("initEnvironment") {
 
         if (!needsWildflyInit) {
             println("⚠️  Nessun profilo richiede WildFly init. Profili attivi: ${activeProfiles.joinToString(", ")}")
-            return@doFirst
+            return@doLast
         }
 
         println("📁 Verificando e creando directory necessarie...")
@@ -236,17 +544,17 @@ tasks.register<Exec>("initEnvironment") {
         if (wildflyStandaloneConfig.exists() && wildflyStandaloneConfig.listFiles()?.isNotEmpty() == true &&
             wildflyDomainConfig.exists() && wildflyDomainConfig.listFiles()?.isNotEmpty() == true) {
             println("✅ File di configurazione WildFly già presenti, skip inizializzazione")
-            return@doFirst
+            return@doLast
         }
 
         println("🚀 Avvio container wildfly-init per inizializzazione...")
 
-        var command = mutableListOf(
+        val command = mutableListOf(
             "docker", "compose",
             "--project-name=dev-env-init", // Nome progetto diverso per evitare conflitti
-            "-f", "./docker-compose.wildfly-init.yml"
+            "-f", "docker-compose.wildfly-init.yml"
         )
-        addEnvFiles(command)
+        addEnvFiles(command, workingDir)
         command.addAll(listOf("run", "--rm", "wildfly-init"))
 
         try {
@@ -262,7 +570,7 @@ tasks.register<Exec>("initEnvironment") {
                 val cleanupCommand = listOf(
                     "docker", "compose",
                     "--project-name=dev-env-init",
-                    "-f", "./docker-compose.wildfly-init.yml",
+                    "-f", "docker-compose.wildfly-init.yml",
                     "down", "--remove-orphans", "--timeout", "10"
                 )
                 executeCommandWithTimeout(cleanupCommand, workingDir, "Cleanup container init", 2)
@@ -299,24 +607,23 @@ tasks.register<Exec>("initEnvironment") {
     }
 }
 
-tasks.register<Exec>("startEnvironment") {
+tasks.register("startEnvironment") {
     group = "environment"
     description = "Avvia i servizi Docker in background con profili"
 
-    workingDir = file("./src/main/docker")
+    // Dipende dall'inizializzazione
+    dependsOn("initEnvironment")
 
-    // Comando dummy che viene eseguito dopo doFirst
-    commandLine("docker", "version")
-
-    doFirst {
-        val activeProfiles = getActiveProfiles()
+    doLast {
+        val workingDir = file("./src/main/docker")
+        val activeProfiles = getActiveProfiles(workingDir)
 
         println("🚀 Avvio dei servizi dell'environment con profili: ${activeProfiles.joinToString(", ")}")
 
-        var command = mutableListOf(
+        val command = mutableListOf(
             "docker", "compose",
             "--project-name=dev-env",
-            "-f", "./docker-compose.yml"
+            "-f", "docker-compose.yml"
         )
 
         // Aggiungi i profili al comando
@@ -324,14 +631,10 @@ tasks.register<Exec>("startEnvironment") {
             command.addAll(listOf("--profile", profile))
         }
 
-        addEnvFiles(command)
+        addEnvFiles(command, workingDir)
         command.addAll(listOf("up", "--detach"))
 
         executeCommand(command, workingDir, "Avvio servizi con profili")
-    }
-
-    doLast {
-        val activeProfiles = getActiveProfiles()
 
         // Health checks
         println("🔎 Controllo stato dei container...")
@@ -359,16 +662,13 @@ tasks.register<Exec>("startEnvironment") {
     }
 }
 
-tasks.register<Exec>("stopEnvironment") {
+tasks.register("stopEnvironment") {
     group = "environment"
     description = "Ferma tutti i container dell'environment"
 
-    workingDir = file("./src/main/docker")
+    doLast {
+        val workingDir = file("./src/main/docker")
 
-    // Comando dummy
-    commandLine("docker", "version")
-
-    doFirst {
         println("🛑 Fermando l'environment...")
         val command = listOf(
             "docker", "compose",
@@ -382,16 +682,13 @@ tasks.register<Exec>("stopEnvironment") {
     }
 }
 
-tasks.register<Exec>("resetEnvironment") {
+tasks.register("resetEnvironment") {
     group = "environment"
     description = "Ferma e rimuove tutti i container e volumes"
 
-    workingDir = file("./src/main/docker")
+    doLast {
+        val workingDir = file("./src/main/docker")
 
-    // Comando dummy
-    commandLine("docker", "version")
-
-    doFirst {
         println("🛑 Arresto completo ambiente Docker...")
         val downCmd = listOf(
             "docker", "compose",
@@ -424,17 +721,13 @@ tasks.register<Exec>("resetEnvironment") {
     }
 }
 
-tasks.register<Exec>("statusEnvironment") {
+tasks.register("statusEnvironment") {
     group = "environment"
     description = "Mostra lo status di tutti i container"
 
-    workingDir = file("./src/main/docker")
-
-    // Comando dummy
-    commandLine("docker", "version")
-
-    doFirst {
-        val activeProfiles = getActiveProfiles()
+    doLast {
+        val workingDir = file("./src/main/docker")
+        val activeProfiles = getActiveProfiles(workingDir)
 
         println("📊 Status Environment - Profili attivi: ${activeProfiles.joinToString(", ")}")
 
@@ -473,150 +766,117 @@ tasks.register("logsEnvironment") {
     }
 }
 
-tasks.register<Exec>("bootEnvironment") {
+tasks.register("bootEnvironment") {
     group = "environment"
     description = "Esegue init completo dell'ambiente (download, init, avvio)"
 
-    workingDir = file("./src/main/docker")
+    doLast {
+        val workingDir = file("./src/main/docker")
+        val activeProfiles = getActiveProfiles(workingDir)
 
-    // Comando dummy
-    commandLine("docker", "version")
+        println("\n" + "🚀".repeat(20))
+        println("🚀 BOOT COMPLETO ENVIRONMENT")
+        println("🏷️  Profili: ${activeProfiles.joinToString(", ")}")
+        println("🚀".repeat(20))
 
-    doFirst {
-        val activeProfiles = getActiveProfiles()
-        println("🚀 Boot completo environment con profili: ${activeProfiles.joinToString(", ")}")
+        // STEP 1: Download Images
+        println("\n" + "=".repeat(50))
+        println("📦 STEP 1/3: Download Images")
+        println("=".repeat(50))
 
-        // Esegui downloadImages
-        println("\n=== STEP 1: Download Images ===")
-        var command = mutableListOf("docker", "compose", "-f", "docker-compose.yml")
+        val downloadCmd = mutableListOf("docker", "compose", "-f", "docker-compose.yml")
         activeProfiles.forEach { profile ->
-            command.addAll(listOf("--profile", profile))
+            downloadCmd.addAll(listOf("--profile", profile))
         }
-        addEnvFiles(command)
-        command.add("pull")
-        executeCommand(command, workingDir, "Download immagini Docker")
+        addEnvFiles(downloadCmd, workingDir)
+        downloadCmd.add("pull")
+        executeCommandWithProgressOptimization(downloadCmd, workingDir, "Download immagini Docker")
 
-        // Esegui initEnvironment se necessario
-        val needsWildflyInit = activeProfiles.any {
-            it in listOf("wildfly", "dev", "full")
-        }
+        // STEP 2: Initialize (se necessario)
+        val needsWildflyInit = activeProfiles.any { it in listOf("wildfly", "dev", "full") }
 
         if (needsWildflyInit) {
-            println("\n=== STEP 2: Initialize WildFly ===")
+            println("\n" + "=".repeat(50))
+            println("🔧 STEP 2/3: Initialize WildFly")
+            println("=".repeat(50))
+
             println("📁 Verificando e creando directory necessarie...")
             ensureDirectoriesExist(workingDir)
 
-            println("🚀 Avvio container wildfly-init per inizializzazione...")
-            command = mutableListOf(
-                "docker", "compose",
-                "--project-name=dev-env",
-                "-f", "./docker-compose.wildfly-init.yml"
-            )
-            addEnvFiles(command)
-            command.addAll(listOf("run", "--rm", "wildfly-init"))
-            executeCommand(command, workingDir, "Inizializzazione WildFly")
+            val wildflyStandaloneConfig = workingDir.resolve("wildfly/standalone/configuration")
+            val wildflyDomainConfig = workingDir.resolve("wildfly/domain/configuration")
 
-            println("⏳ Attesa completamento inizializzazione...")
-            Thread.sleep(2000)
+            if (!(wildflyStandaloneConfig.exists() && wildflyStandaloneConfig.listFiles()?.isNotEmpty() == true &&
+                        wildflyDomainConfig.exists() && wildflyDomainConfig.listFiles()?.isNotEmpty() == true)) {
+
+                val initCmd = mutableListOf(
+                    "docker", "compose",
+                    "--project-name=dev-env",
+                    "-f", "docker-compose.wildfly-init.yml"
+                )
+                addEnvFiles(initCmd, workingDir)
+                initCmd.addAll(listOf("run", "--rm", "wildfly-init"))
+                executeCommand(initCmd, workingDir, "Inizializzazione WildFly")
+
+                println("⏳ Pausa di stabilizzazione (2 secondi)...")
+                Thread.sleep(2000)
+            } else {
+                println("✅ File di configurazione WildFly già presenti - skip inizializzazione")
+            }
+        } else {
+            println("\n📋 STEP 2/3: Skipped (nessun profilo richiede WildFly)")
         }
 
-        // Esegui startEnvironment
-        println("\n=== STEP 3: Start Services ===")
-        println("🚀 Avvio dei servizi dell'environment con profili: ${activeProfiles.joinToString(", ")}")
-        command = mutableListOf(
+        // STEP 3: Start Services
+        println("\n" + "=".repeat(50))
+        println("🚀 STEP 3/3: Start Services")
+        println("=".repeat(50))
+
+        val startCmd = mutableListOf(
             "docker", "compose",
             "--project-name=dev-env",
-            "-f", "./docker-compose.yml"
+            "-f", "docker-compose.yml"
         )
         activeProfiles.forEach { profile ->
-            command.addAll(listOf("--profile", profile))
+            startCmd.addAll(listOf("--profile", profile))
         }
-        addEnvFiles(command)
-        command.addAll(listOf("up", "--detach"))
-        executeCommand(command, workingDir, "Avvio servizi con profili")
-    }
-
-    doLast {
-        val activeProfiles = getActiveProfiles()
+        addEnvFiles(startCmd, workingDir)
+        startCmd.addAll(listOf("up", "--detach"))
+        executeCommand(startCmd, workingDir, "Avvio servizi con profili")
 
         // Health checks
-        println("\n=== STEP 4: Health Checks ===")
-        println("🔎 Controllo stato dei container...")
+        println("\n" + "=".repeat(50))
+        println("🔍 VERIFICA FINALE: Health Checks")
+        println("=".repeat(50))
+
+        var allHealthy = true
 
         if (activeProfiles.any { it in listOf("wildfly", "dev", "full") }) {
             if (!checkContainerHealth("WildFly", "dev-env-wildfly-1")) {
-                throw GradleException("WildFly container failed to start properly or is unhealthy")
+                allHealthy = false
+                println("❌ WildFly non è diventato healthy")
             }
         }
 
         if (activeProfiles.any { it in listOf("database", "postgres", "dev", "full", "wildfly") }) {
             if (!checkContainerHealth("PostgreSQL", "dev-env-postgres-1")) {
-                println("⚠️  PostgreSQL potrebbe non essere completamente pronto")
+                println("⚠️  PostgreSQL potrebbe non essere completamente pronto (continuo comunque)")
             }
         }
 
         if (activeProfiles.any { it in listOf("messaging", "rabbitmq", "dev", "full") }) {
             if (!checkContainerHealth("RabbitMQ", "dev-env-rabbitmq-1")) {
-                println("⚠️  RabbitMQ potrebbe non essere completamente pronto")
+                println("⚠️  RabbitMQ potrebbe non essere completamente pronto (continuo comunque)")
             }
         }
 
-        println("🎉 Boot environment completato con successo!")
-        printServiceInfo(activeProfiles)
-    }
-}
-
-// Mantieni il task originale per compatibilità
-tasks.register<Exec>("old_startEnvironment") {
-    group = "environment"
-    description = "Launch the development environment via docker compose (versione originale)"
-
-    workingDir("./src/main/docker")
-
-    doFirst {
-        println("📦 Avvio dell'ambiente di sviluppo Docker Compose...")
-
-        // STEP 1: Esegui wildfly-init
-        println("🚀 Avvio container wildfly-init per inizializzazione...")
-
-        var command = mutableListOf(
-            "docker", "compose",
-            "--project-name=dev-env",
-            "-f", "./docker-compose.wildfly-init.yml"
-        )
-        addEnvFiles(command)
-        command.addAll(listOf("run", "--rm", "wildfly-init"))
-
-        executeCommand(command, workingDir, "Inizializzazione WildFly")
-
-        // Piccola pausa per assicurarsi che l'inizializzazione sia completata
-        println("⏳ Attesa completamento inizializzazione...")
-        Thread.sleep(2000)
-
-        // STEP 2: Avvia i servizi principali
-        println("🚀 Avvio degli altri servizi dell'environment...")
-
-        command = mutableListOf(
-            "docker", "compose",
-            "--project-name=dev-env",
-            "-f", "./docker-compose.yml"
-        )
-        addEnvFiles(command)
-        command.addAll(listOf("up", "--detach"))
-
-        executeCommand(command, workingDir, "Avvio servizi")
-    }
-
-    commandLine("docker", "version")  // Comando dummy
-
-    doLast {
-        if (!checkContainerHealth("WildFly", "dev-env-wildfly-1")) {
-            throw GradleException("WildFly container failed to start properly or is unhealthy")
+        if (!allHealthy) {
+            throw GradleException("❌ Alcuni container critici non sono healthy")
         }
 
-        println("🎉 WildFly environment started successfully")
-        println("Management console available at: http://localhost:9990")
-        println("Username: ${System.getenv("WILDFLY_ADMIN_USER") ?: "admin"}")
-        println("Password: ${System.getenv("WILDFLY_ADMIN_PASSWORD") ?: "admin123"}")
+        println("\n" + "🎉".repeat(20))
+        println("🎉 BOOT ENVIRONMENT COMPLETATO CON SUCCESSO!")
+        println("🎉".repeat(20))
+        printServiceInfo(activeProfiles)
     }
 }
